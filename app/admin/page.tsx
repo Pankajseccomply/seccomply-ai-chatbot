@@ -2,6 +2,65 @@
 import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 
+/* ── Inline password gate — no middleware needed ── */
+function AdminGate({ children }: { children: React.ReactNode }) {
+  const [authed,  setAuthed]  = useState(false);
+  const [checked, setChecked] = useState(false);
+  const [pw,      setPw]      = useState('');
+  const [error,   setError]   = useState(false);
+
+  useEffect(() => {
+    const ok = sessionStorage.getItem('sc_admin_ok');
+    if (ok === '1') setAuthed(true);
+    setChecked(true);
+  }, []);
+
+  function submit(e: React.FormEvent) {
+    e.preventDefault();
+    const expected = process.env.NEXT_PUBLIC_ADMIN_PASSWORD || 'admin123';
+    if (pw === expected) {
+      sessionStorage.setItem('sc_admin_ok', '1');
+      setAuthed(true);
+      setError(false);
+    } else {
+      setError(true);
+      setPw('');
+    }
+  }
+
+  if (!checked) return null;
+
+  if (!authed) return (
+    <div style={{ minHeight:'100vh', background:'#070f1c', display:'flex', alignItems:'center', justifyContent:'center', fontFamily:'Manrope,sans-serif' }}>
+      <div style={{ background:'#0f1e32', border:'1px solid rgba(255,255,255,.08)', borderRadius:20, padding:'40px 36px', width:380, boxShadow:'0 24px 72px rgba(0,0,0,.6)' }}>
+        <div style={{ textAlign:'center', marginBottom:28 }}>
+          <div style={{ width:54, height:54, borderRadius:14, background:'linear-gradient(135deg,#FF8040,#C0392B)', display:'flex', alignItems:'center', justifyContent:'center', margin:'0 auto 14px' }}>
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+          </div>
+          <h1 style={{ fontSize:'1.15rem', fontWeight:800, color:'#fff', margin:0 }}>SecComply Admin</h1>
+          <p style={{ fontSize:'.78rem', color:'#4a6a8a', marginTop:6 }}>Enter your admin password to continue</p>
+        </div>
+        <form onSubmit={submit} style={{ display:'flex', flexDirection:'column', gap:14 }}>
+          <input
+            type="password"
+            value={pw}
+            onChange={e => { setPw(e.target.value); setError(false); }}
+            placeholder="Admin password"
+            autoFocus
+            style={{ background:'rgba(255,255,255,.06)', border:`1.5px solid ${error ? '#ff4757' : 'rgba(255,255,255,.1)'}`, borderRadius:11, padding:'12px 15px', fontSize:'.9rem', color:'#c8deff', fontFamily:'inherit', outline:'none', transition:'border-color .2s' }}
+          />
+          {error && <p style={{ margin:0, fontSize:'.76rem', color:'#ff6b6b' }}>Incorrect password. Please try again.</p>}
+          <button type="submit" style={{ background:'linear-gradient(135deg,#FF6B35,#C94726)', border:'none', borderRadius:11, padding:'12px', color:'#fff', fontWeight:700, fontSize:'.9rem', cursor:'pointer', fontFamily:'inherit', boxShadow:'0 4px 16px rgba(255,107,53,.35)' }}>
+            Sign In →
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+
+  return <>{children}</>;
+}
+
 const CATS = ['general','frameworks','sales','technical'];
 const CAT_COLOR: Record<string,{bg:string,color:string}> = {
   general:    {bg:'#f0f4ff',color:'#4060b0'},
@@ -157,7 +216,7 @@ function PdfUpload() {
 }
 
 // ── Main Admin Page ───────────────────────────────────────
-export default function AdminPage() {
+function AdminPageInner() {
   const [questions, setQuestions] = useState<Question[]>([]);
   const [loading,   setLoading]   = useState(true);
   const [filter,    setFilter]    = useState('all');
@@ -365,4 +424,8 @@ export default function AdminPage() {
       <style>{`@keyframes tdot{0%,80%,100%{transform:translateY(0)}40%{transform:translateY(-7px)}}`}</style>
     </div>
   );
+}
+
+export default function AdminPage() {
+  return <AdminGate><AdminPageInner /></AdminGate>;
 }
