@@ -403,7 +403,7 @@ function Chips({ items, onSend }) {
 export default function ChatWidget() {
   const [mounted, setMounted] = useState(false);
   const [open,    setOpen]    = useState(false);
-  const [screen,  setScreen]  = useState('lang');   // lang | chat
+  const [screen,  setScreen]  = useState('chat');   // lang | chat  -- starts directly in chat
   const [lang,    setLang]    = useState(LANGS[0]);
   const [msgs,    setMsgs]    = useState([]);
   const [input,   setInput]   = useState('');
@@ -497,9 +497,10 @@ export default function ChatWidget() {
   }
 
   function switchLang(l) {
-    setLangDD(false); setLang(l); setScreen('lang');
+    setLangDD(false);
+    setLang(l);
     inited.current = false;
-    setTimeout(() => pickLang(l), 80);
+    setScreen('chat');  // stay on chat, never show lang picker
   }
 
   async function send(text) {
@@ -582,7 +583,7 @@ export default function ChatWidget() {
 
           {screen === 'lang'
             ? <LangPicker onPick={pickLang}/>
-            : <>
+            : <> {/* always chat */}
                 {/* HEADER */}
                 <header className="hdr">
                   <div className="hdr-left">
