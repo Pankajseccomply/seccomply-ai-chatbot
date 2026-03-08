@@ -2,33 +2,54 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
 export function middleware(req: NextRequest) {
-  // Only protect /admin routes
-  const authHeader = req.headers.get('authorization');
+  const { pathname } = req.nextUrl;
 
-  if (authHeader) {
-    const base64 = authHeader.replace('Basic ', '');
-    const decoded = Buffer.from(base64, 'base64').toString('utf-8');
-    const [username, password] = decoded.split(':');
+  // Guard 1: matcher config (below) limits this to /admin routes only
+  // Guard 2: explicit pathname check — safety net for Netlify edge runtime
+  // Guard 3: never block API routes, static files, or Next internals
+  if (
+    !pathname.startsWith('/admin') ||
+    pathname.startsWith('/api/') ||
+    pathname.startsWith('/_next/') ||
+    pathname.includes('.')
+  ) {
+    return NextResponse.next();
+  }
 
-    const validUser = username === 'admin';
-    const validPass = password === (process.env.ADMIN_PASSWORD || 'admin123');
+  const authHeader = req.headers.get('authorization') || '';
 
-    if (validUser && validPass) {
-      return NextResponse.next();
+  if (authHeader.startsWith('Basic ')) {
+    try {
+      const decoded  = atob(authHeader.slice(6));          // atob works on Edge, no Buffer needed
+      const colon    = decoded.indexOf(':');
+      const username = decoded.slice(0, colon);
+      const password = decoded.slice(colon + 1);
+
+      const expectedPass = process.env.ADMIN_PASSWORD || 'admin123';
+
+      if (username === 'admin' && password === expectedPass) {
+        return NextResponse.next();
+      }
+    } catch {
+      // malformed header — fall through to 401
     }
   }
 
-  // Prompt browser for username/password
+  // Prompt browser for credentials
   return new NextResponse('Unauthorized', {
     status: 401,
     headers: {
-      'WWW-Authenticate': 'Basic realm="SecComply Admin"',
+      'WWW-Authenticate': 'Basic realm="SecComply Admin", charset="UTF-8"',
+      'Content-Type': 'text/plain',
     },
   });
 }
 
-// ✅ ONLY run this middleware on /admin and /admin/* routes
-// All other pages (homepage, contact, chatbot API etc.) are completely unprotected
+// Matcher: only run this middleware on /admin paths
+// Explicitly exclude everything else so Netlify doesn't apply it globally
 export const config = {
-  matcher: ['/admin', '/admin/:path*'],
+  matcher: [
+    '/admin',
+    '/admin/:path*',
+  ],
 };

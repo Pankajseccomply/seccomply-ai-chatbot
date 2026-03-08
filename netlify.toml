@@ -1,0 +1,9 @@
+[build]
+  command   = "npm run build"
+  publish   = ".next"
+
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
+
+# Do NOT add any [[redirects]] or [[headers]] for /admin here —
+# let Next.js middleware handle it entirely

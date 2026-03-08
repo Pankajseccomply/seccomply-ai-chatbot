@@ -1,118 +1,236 @@
 import { NextResponse } from 'next/server';
 import supabase from '../../../lib/supabase';
 
-export async function POST(req: Request) {
-  try {
-    const { messages, session_id, language = 'English', msg_count = 0 } = await req.json();
+export const runtime = 'nodejs';
 
-    const apiKey = process.env.GROQ_API_KEY;
-    if (!apiKey) return NextResponse.json({ success: false, error: 'GROQ_API_KEY not set' }, { status: 500 });
+// ─────────────────────────────────────────────────────────────
+// MODEL FALLBACK CHAIN  (primary → fallback)
+// llama-3.3-70b-versatile  → higher free-tier TPM, smarter
+// llama-3.1-8b-instant     → fastest, lower TPM
+// ─────────────────────────────────────────────────────────────
+const MODELS = ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant'];
 
-    const { data: kb } = await supabase
-      .from('company_knowledge')
-      .select('content, filename')
-      .order('created_at', { ascending: false })
-      .limit(1);
+// ─────────────────────────────────────────────────────────────
+// COMPACT KNOWLEDGE BASE  (~600 tokens)
+// ─────────────────────────────────────────────────────────────
+const KB = `
+SecComply — AI compliance automation platform
+Website: https://seccomply.net | Phone: +91 9860013381
+Book: https://outlook.office.com/book/SecComplyMeeting1@seccomply.net
 
-    const knowledge = kb?.[0]?.content || null;
+STATS: 8x faster audits · 90% less manual work · 50+ frameworks · 100+ integrations
 
-    const SYSTEM = `You are the SecComply AI assistant — a warm, knowledgeable compliance advisor.
+FRAMEWORKS: SOC 2, ISO 27001, HIPAA, GDPR, PCI DSS, NIST, CSA STAR, DPDPA, CCPA, FedRAMP, SOX, ISO 42001, ISO 27701 + more. Controls mapped ONCE, reused across frameworks.
 
-${knowledge
-  ? `KNOWLEDGE RULES:
-- For SecComply-specific questions (pricing, features, plans, demos, team, integrations) → answer ONLY from the company document below.
-- For general compliance questions (SOC 2, HIPAA, ISO 27001, GDPR etc.) → use your expertise.
-- If a SecComply question is not in the document → say "I don't have that specific detail — please reach out to our team at hello@seccomply.io"
+PLATFORM FEATURES:
+• AI Risk Assessment — ML risk scoring, impact heatmaps, dependency mapping
+• Smart Evidence Collection — AI agents auto-gather & validate from 100+ integrations
+• Anomaly Detection — real-time compliance drift detection
+• Automated Control Testing — 24/7 continuous control validation
+• Policy Automation — auto-generate, version, distribute security policies
+• Audit Management — full lifecycle: scoping → evidence → auditor portal
+• Vendor Risk Management — AI third-party risk scoring
+• Trust Center — white-label compliance portal with AI questionnaire auto-fill
+• Compliance Dashboard — real-time scores, gaps, evidence status
 
---- COMPANY KNOWLEDGE BASE (${kb?.[0]?.filename}) ---
-${knowledge.slice(0, 10000)}
---- END ---`
-  : `About SecComply: GRC automation platform. Supports SOC 2, ISO 27001, HIPAA, GDPR, PCI DSS, NIST and 50+ frameworks. AI-powered evidence collection, 300+ integrations (AWS, GitHub, Okta, Slack, Jira). Plans from $299/mo. 14-day free trial.`}
+SERVICES: ISO 27001 consulting, SOC 2 readiness, HIPAA risk assessment, GDPR support, DPDP Act compliance, VAPT, Cloud security (AWS/Azure/GCP), Security policy writing, Compliance-as-a-Service, Internal audit, CISO-as-a-Service
 
-CRITICAL — You MUST respond with ONLY a raw JSON object. No markdown, no explanation, no code fences.
-Exactly this structure:
-{"answer":"your reply here","suggestions":["suggestion 1","suggestion 2"]}
+TEAM:
+• Shivani Tikadia — CEO & Founder (ex-PwC, 10+ yrs, 100+ orgs, 50+ Fortune 500)
+• Vandana Pawar — GRC Lead (ISO 27001 Lead Auditor, GDPR/HIPAA specialist)
+• Shyam V — Advisory (ex-BYJU'S/Myntra/PropertyGuru)
 
-ANSWER RULES:
-- Under 140 words, warm and conversational
-- Only ask a follow-up question if it genuinely fits — do NOT force questions
-- Let the user lead
+PROOF: "SOC 2 from 12 weeks → 10 days" · "AI found compliance gaps we didn't know existed" · Multi-framework (SOC 2 + ISO 27001 + HIPAA) managed simultaneously with shared controls.
 
-SUGGESTIONS RULES:
-- Exactly 2 short suggestions (under 6 words each)
-- Directly relevant to what the user just asked
-- Never repeat topics already discussed
-- In ${language} language
+FREE: DPDP Act readiness assessment at seccomply.net
+`;
 
-LANGUAGE: Reply entirely in ${language}.`;
+// ─────────────────────────────────────────────────────────────
+// GROQ API CALL  with per-model retry on rate limit
+// ─────────────────────────────────────────────────────────────
+async function callGroq(
+  apiKey: string,
+  systemPrompt: string,
+  messages: any[],
+  modelIndex = 0
+): Promise<any> {
+  const model = MODELS[modelIndex];
 
-    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
-      },
+  const res  = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+    body: JSON.stringify({
+      model,
+      messages: [{ role: 'system', content: systemPrompt }, ...messages],
+      max_tokens:  350,
+      temperature: 0.65,
+    }),
+  });
+
+  const data = await res.json();
+
+  if (res.ok) return data;
+
+  const code = data?.error?.code;
+
+  // Model decommissioned → try next model
+  if (code === 'model_decommissioned' || data?.error?.message?.includes('decommissioned')) {
+    if (modelIndex + 1 < MODELS.length) {
+      console.warn(`Model ${model} decommissioned, trying ${MODELS[modelIndex + 1]}`);
+      return callGroq(apiKey, systemPrompt, messages, modelIndex + 1);
+    }
+  }
+
+  // Rate limited → wait then try next model (or same if last)
+  if (code === 'rate_limit_exceeded') {
+    const match = data.error.message?.match(/try again in (\d+(?:\.\d+)?)s/);
+    const wait  = match ? Math.ceil(parseFloat(match[1]) * 1000) + 300 : 3000;
+
+    if (modelIndex + 1 < MODELS.length) {
+      console.warn(`Rate limit on ${model}, switching to ${MODELS[modelIndex + 1]}`);
+      // Small wait then try fallback model
+      await new Promise(r => setTimeout(r, Math.min(wait, 1500)));
+      return callGroq(apiKey, systemPrompt, messages, modelIndex + 1);
+    }
+    // No more fallbacks — wait and retry same model once
+    console.warn(`Rate limit on ${model}, waiting ${wait}ms then retrying`);
+    await new Promise(r => setTimeout(r, wait));
+    const retry = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
       body: JSON.stringify({
-        model: 'llama-3.1-8b-instant',
-        messages: [
-          { role: 'system', content: SYSTEM },
-          ...messages,
-        ],
-        max_tokens: 500,
-        temperature: 0.7,
-        // No response_format — not reliably supported by this model
+        model,
+        messages: [{ role: 'system', content: systemPrompt }, ...messages],
+        max_tokens: 350, temperature: 0.65,
       }),
     });
+    const retryData = await retry.json();
+    if (retry.ok) return retryData;
+    throw new Error(retryData?.error?.message || `Groq error ${retry.status}`);
+  }
 
-    const data = await response.json();
+  throw new Error(data?.error?.message || `Groq HTTP ${res.status}`);
+}
 
-    if (!response.ok) {
-      console.error('Groq API error:', data);
-      return NextResponse.json({ success: false, error: data.error?.message || 'API error' }, { status: response.status });
+// ─────────────────────────────────────────────────────────────
+// ROUTE HANDLER
+// ─────────────────────────────────────────────────────────────
+export async function POST(req: Request) {
+  // Declare session_id at top scope so catch block can access it
+  let session_id = '';
+
+  try {
+    const body = await req.json();
+    const { messages, language = 'English', msg_count = 0 } = body;
+    session_id = body.session_id || crypto.randomUUID();
+
+    const apiKey = process.env.GROQ_API_KEY;
+    if (!apiKey) {
+      return NextResponse.json({ error: 'GROQ_API_KEY not set' }, { status: 500 });
     }
 
-    const raw = data.choices?.[0]?.message?.content || '';
+    // ── RAG: Supabase FTS (top 3 chunks, max 1200 chars) ─────
+    let ragCtx = '';
+    try {
+      const q = messages.at(-1)?.content || '';
+      const { data: chunks, error } = await supabase.rpc('search_chunks', {
+        query_text: q, match_count: 3,
+      });
+      if (!error && chunks?.length > 0) {
+        ragCtx = chunks.map((c: any) => c.content).join('\n\n').slice(0, 1200);
+      }
+    } catch (e: any) {
+      console.warn('RAG skipped:', e.message);
+    }
 
-    // Robustly extract JSON — handles cases where model wraps in ```json fences
+    const knowledgeSrc = ragCtx
+      ? `UPLOADED DOC:\n${ragCtx}\n\nKB:\n${KB}`
+      : KB;
+
+    // ── Trim history to last 6 messages ──────────────────────
+    const history = messages.slice(-6);
+
+    // ── Compact system prompt (~380 tokens) ──────────────────
+    const SYSTEM = `You are Veri — SecComply's AI compliance guide. "Veri" = verify + verity (truth). Speak like a warm, knowledgeable friend: confident, empathetic, occasionally witty. Never robotic.
+
+KNOWLEDGE:
+${knowledgeSrc}
+
+RULES:
+1. Answer ANY question; tie back to SecComply naturally.
+2. Compliance topics: explain simply → connect to SecComply specifically.
+3. Business pain points: empathy first → SecComply as obvious solution.
+4. Persuasion (natural, never pushy): social proof, value reframe, soft CTA when right.
+5. NEVER say "Certainly!", "Absolutely!", "Great question!" — just answer.
+6. 70–120 words. Human voice. Short sentences. **Bold** 1–2 key facts only.
+
+OUTPUT — your ENTIRE response must be ONLY this JSON object. No text before it, no text after it, no markdown fences:
+{"answer":"your reply here","suggestions":["chip 1","chip 2"]}
+
+CRITICAL: Do NOT write any text outside the JSON. The very first character of your response must be { and the very last must be }.
+
+Suggestions: exactly 2 items, 4–7 words each, phrased as what the USER would ask (not bot-voice), only topics present in the KB above, never repeat ones from this conversation.
+Reply entirely in: ${language}.`;
+
+    // ── Call Groq with model fallback ─────────────────────────
+    const data = await callGroq(apiKey, SYSTEM, history);
+    const raw  = data.choices?.[0]?.message?.content || '';
+
+    // ── Parse JSON response ───────────────────────────────────
+    // Model sometimes prepends text before JSON, or adds }} at end.
+    // Strategy: find first '{', then try every '}' from the right.
     let reply       = '';
     let suggestions: string[] = [];
-
     try {
-      // Strip markdown fences if present
-      const cleaned = raw
-        .replace(/```json\s*/gi, '')
-        .replace(/```\s*/gi, '')
-        .trim();
+      const clean = raw.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim();
+      const start  = clean.indexOf('{');
 
-      // Find JSON object boundaries
-      const start = cleaned.indexOf('{');
-      const end   = cleaned.lastIndexOf('}');
+      if (start !== -1) {
+        // Try progressively shorter endings until JSON.parse succeeds
+        let parsed: any = null;
+        let pos = clean.length - 1;
+        while (pos > start) {
+          if (clean[pos] === '}') {
+            try {
+              parsed = JSON.parse(clean.slice(start, pos + 1));
+              break; // success
+            } catch { /* keep trimming */ }
+          }
+          pos--;
+        }
+        if (parsed) {
+          reply       = (parsed.answer || '').trim();
+          suggestions = Array.isArray(parsed.suggestions)
+            ? parsed.suggestions.filter((s: any) => typeof s === 'string' && s.length > 2).slice(0, 2)
+            : [];
+        }
+      }
 
-      if (start !== -1 && end !== -1 && end > start) {
-        const jsonStr = cleaned.slice(start, end + 1);
-        const parsed  = JSON.parse(jsonStr);
-        reply       = parsed.answer      || raw;
-        suggestions = Array.isArray(parsed.suggestions) ? parsed.suggestions.slice(0, 2) : [];
-      } else {
-        // Model didn't return JSON — use raw text as the reply
-        reply = raw;
+      // Final fallback: strip any JSON blob from raw text and show plain text
+      if (!reply) {
+        reply = clean.replace(/\{[\s\S]*\}/, '').trim() || "I'm having a moment — please try again!";
       }
     } catch {
-      // JSON parse failed — use raw text
-      reply = raw || 'Sorry, something went wrong. Please try again.';
+      // Strip JSON from raw and show just the text portion
+      reply = raw.replace(/\{[\s\S]*\}/, '').trim() || "I'm having a moment — please try again!";
     }
 
-    // Log to Supabase async (non-blocking)
-    const sid = session_id || crypto.randomUUID();
+    // ── Log to Supabase (fire and forget) ────────────────────
     supabase.from('chat_logs').insert([
-      { session_id: sid, role: 'user',      content: messages.at(-1)?.content || '' },
-      { session_id: sid, role: 'assistant', content: reply },
+      { session_id, role: 'user',      content: messages.at(-1)?.content || '' },
+      { session_id, role: 'assistant', content: reply },
     ]).then(() => {}).catch(() => {});
 
-    return NextResponse.json({ success: true, reply, suggestions, session_id: sid });
+    return NextResponse.json({ success: true, reply, suggestions, session_id });
 
   } catch (err: any) {
     console.error('CHAT ERROR:', err.message);
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+    // Return a graceful fallback — never show a raw error to the user
+    return NextResponse.json({
+      success:    true,
+      reply:      "I'm getting a lot of questions right now 🙏 Give me just a second and send that again — I promise I'll have a good answer!",
+      suggestions: ['Book a consultation', 'SecComply services?'],
+      session_id,
+    });
   }
 }
