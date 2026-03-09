@@ -164,12 +164,26 @@ RULES:
 5. NEVER say "Certainly!", "Absolutely!", "Great question!" — just answer.
 6. 70–120 words. Human voice. Short sentences. **Bold** 1–2 key facts only.
 
-OUTPUT — your ENTIRE response must be ONLY this JSON object. No text before it, no text after it, no markdown fences:
-{"answer":"your reply here","suggestions":["chip 1","chip 2"]}
+━━━ CONFIDENCE & ESCALATION ━━━
+Before answering, assess: is the answer FULLY available in the knowledge base above?
 
-CRITICAL: Do NOT write any text outside the JSON. The very first character of your response must be { and the very last must be }.
+- If YES (confident) → answer normally.
+- If PARTIALLY available → answer what you know, then add: "For the full picture, our team can walk you through the specifics — reach us at +91 9860013381 or seccomply.net/contact"
+- If NOT in KB at all → do NOT guess or make up details. Instead say something like: "That's a great specific question — it's best answered by our experts directly. You can reach the SecComply team at **+91 9860013381** or [seccomply.net/contact](https://seccomply.net/contact). They'll give you an exact answer within hours."
 
-Suggestions: exactly 2 items, 4–7 words each, phrased as what the USER would ask (not bot-voice), only topics present in the KB above, never repeat ones from this conversation.
+━━━ OUTPUT FORMAT ━━━
+Your ENTIRE response must be ONLY this raw JSON object. First character { last character }. No text outside it. No markdown fences:
+{"answer":"your reply","suggestions":["chip 1","chip 2"],"confident":true}
+
+━━━ SUGGESTIONS RULES ━━━
+- Exactly 2 suggestions
+- MUST be directly related to what the user just asked — not generic openers
+- Example: user asks about SOC 2 → suggest "SOC 2 Type II difference?" and "How long does SOC 2 take?"
+- Example: user asks about pricing → suggest "Book a free consultation" and "What's included in CaaS?"
+- Phrased as what the USER would type next (not bot-voice like "Would you like...")
+- 4–7 words each
+- Only suggest topics that exist in the KB
+- Never repeat a suggestion already shown in this conversation
 Reply entirely in: ${language}.`;
 
     // ── Call Groq with model fallback ─────────────────────────
@@ -181,6 +195,7 @@ Reply entirely in: ${language}.`;
     // Strategy: find first '{', then try every '}' from the right.
     let reply       = '';
     let suggestions: string[] = [];
+    let confident   = true;
     try {
       const clean = raw.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim();
       const start  = clean.indexOf('{');
@@ -203,6 +218,7 @@ Reply entirely in: ${language}.`;
           suggestions = Array.isArray(parsed.suggestions)
             ? parsed.suggestions.filter((s: any) => typeof s === 'string' && s.length > 2).slice(0, 2)
             : [];
+          confident   = parsed.confident !== false; // default true if missing
         }
       }
 
@@ -221,7 +237,7 @@ Reply entirely in: ${language}.`;
       { session_id, role: 'assistant', content: reply },
     ]).then(() => {}).catch(() => {});
 
-    return NextResponse.json({ success: true, reply, suggestions, session_id });
+    return NextResponse.json({ success: true, reply, suggestions, confident, session_id });
 
   } catch (err: any) {
     console.error('CHAT ERROR:', err.message);

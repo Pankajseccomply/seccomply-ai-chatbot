@@ -397,6 +397,34 @@ function Chips({ items, onSend }) {
   );
 }
 
+/* ── Contact escalation card ── */
+function ContactCard() {
+  return (
+    <div className="ct-card">
+      <div className="ct-icon">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+          <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/>
+          <path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+        </svg>
+      </div>
+      <div className="ct-body">
+        <div className="ct-title">Talk to our team</div>
+        <div className="ct-sub">Get an exact answer from a compliance expert</div>
+        <div className="ct-actions">
+          <a href={`tel:${PHONE}`} className="ct-btn ct-btn-green">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2A19.79 19.79 0 0 1 4.69 12 19.79 19.79 0 0 1 3.6 1.25h3A2 2 0 0 1 8.6 3a12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L7.91 8.9a16 16 0 0 0 6 6l.95-.95a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 21.5 16.5z"/></svg>
+            Call Now
+          </a>
+          <a href={CONTACT_URL} target="_blank" rel="noreferrer" className="ct-btn ct-btn-orange">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+            Contact Us
+          </a>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ═══════════════════════════════════════════════════════════════
    MAIN WIDGET
 ═══════════════════════════════════════════════════════════════ */
@@ -459,7 +487,10 @@ export default function ChatWidget() {
     const chips = (CHIPS0[lang.code] || CHIPS0.en).slice(0,4);
     setTimeout(() => {
       pushBot(now.welcome, chips);
-      tts(now.welcome.replace(/\*\*/g,'').replace(/\*/g,'').replace(/\n/g,' ').slice(0,260), lang.voice, () => setSpkId(null));
+      // Speak welcome once on first open only
+      if (msgN.current === 0) {
+        tts(now.welcome.replace(/\*\*/g,'').replace(/\*/g,'').replace(/\n/g,' ').slice(0,260), lang.voice, () => setSpkId(null));
+      }
     }, 500);
   }, [screen, lang.code]);
 
@@ -489,8 +520,8 @@ export default function ChatWidget() {
 
   const ts = () => new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
 
-  function pushBot(text, chips=[]) {
-    setMsgs(p => [...p, {id:Date.now()+Math.random(), role:'bot', text, time:ts(), chips}]);
+  function pushBot(text, chips=[], confident=true) {
+    setMsgs(p => [...p, {id:Date.now()+Math.random(), role:'bot', text, time:ts(), chips, confident}]);
   }
   function pushUser(text) {
     setMsgs(p => [...p, {id:Date.now()+Math.random(), role:'user', text, time:ts()}]);
@@ -527,14 +558,16 @@ export default function ChatWidget() {
         body: JSON.stringify({ messages:next, session_id:sid.current, language:lang.label, msg_count:msgN.current }) });
       const d  = await r.json();
       const reply = d.reply || 'Something went wrong. Please try again!';
-      let chips = (d.suggestions||[]).filter(s => !asked.current.has(s.toLowerCase().trim()));
-      if (chips.length < 2) chips = [...chips, ...fallbackChips(3-chips.length)];
-      chips = chips.filter(s => !asked.current.has(s.toLowerCase())).slice(0,3);
+      // Use API suggestions directly — they are context-aware
+      // Only pad with fallbacks if API returned nothing at all
+      let chips = (d.suggestions||[]).filter(s => typeof s === 'string' && s.trim() && !asked.current.has(s.toLowerCase().trim()));
+      if (chips.length === 0) chips = fallbackChips(2);
+      chips = chips.slice(0, 3);
+      const confident = d.confident !== false; // default true
       setHist(p => [...p, { role:'assistant', content:reply }]);
       setTimeout(() => {
-        pushBot(reply, chips);
-        tts(reply.replace(/\*\*/g,'').replace(/\*/g,'').slice(0,300), lang.voice, () => setSpkId(null));
-        setSpkId('latest');
+        pushBot(reply, chips, confident);
+        // Do NOT auto-speak — user can tap the Listen button if they want
       }, 60);
     } catch {
       pushBot('Something went wrong. Please try again!');
@@ -689,6 +722,7 @@ export default function ChatWidget() {
                           )}
                         </div>
                         {m.role==='bot' && m.chips?.length > 0 && <Chips items={m.chips} onSend={send}/>}
+                        {m.role==='bot' && m.confident===false && <ContactCard/>}
                       </div>
                     </div>
                   ))}
@@ -1172,6 +1206,32 @@ export default function ChatWidget() {
         @keyframes dot        { 0%,80%,100%{transform:translateY(0)} 40%{transform:translateY(-9px)} }
         @keyframes wave       { from{height:4px} to{height:18px} }
         @keyframes call-ring  { 0%{transform:scale(1);opacity:.6} 100%{transform:scale(1.5);opacity:0} }
+
+        /* ── Contact escalation card ── */
+        .ct-card {
+          display:flex; align-items:flex-start; gap:10px;
+          background:rgba(76,230,168,.07); border:1.5px solid rgba(76,230,168,.2);
+          border-radius:12px; padding:12px 14px; margin-top:10px;
+          margin-left:40px; animation:msg-in .3s ease;
+        }
+        .ct-icon {
+          width:34px; height:34px; border-radius:9px; flex-shrink:0;
+          background:rgba(76,230,168,.15); color:var(--green);
+          display:flex; align-items:center; justify-content:center;
+        }
+        .ct-body { display:flex; flex-direction:column; gap:8px; }
+        .ct-title { font-size:.82rem; font-weight:700; color:#fff; }
+        .ct-sub   { font-size:.73rem; color:var(--muted); }
+        .ct-actions { display:flex; gap:8px; flex-wrap:wrap; }
+        .ct-btn {
+          display:flex; align-items:center; gap:5px;
+          padding:6px 12px; border-radius:8px; font-size:.73rem; font-weight:700;
+          text-decoration:none; font-family:var(--font); transition:all .18s;
+        }
+        .ct-btn-green  { background:rgba(76,230,168,.15); color:var(--green); border:1px solid rgba(76,230,168,.25); }
+        .ct-btn-green:hover  { background:rgba(76,230,168,.28); }
+        .ct-btn-orange { background:rgba(255,107,53,.12); color:var(--accent); border:1px solid rgba(255,107,53,.25); }
+        .ct-btn-orange:hover { background:rgba(255,107,53,.24); }
 
         /* ── Responsive ── */
         @media(max-width:480px){
