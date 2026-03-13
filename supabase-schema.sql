@@ -19,6 +19,17 @@ CREATE TABLE IF NOT EXISTS chat_logs (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS support_tickets (
+  id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name       TEXT NOT NULL,
+  email      TEXT NOT NULL,
+  subject    TEXT NOT NULL,
+  priority   TEXT NOT NULL DEFAULT 'Medium',
+  message    TEXT NOT NULL,
+  status     TEXT NOT NULL DEFAULT 'open',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 -- Starter questions (shown as chips in the chatbot)
 INSERT INTO questions (label, message, category, sort_order) VALUES
   ('What is SecComply?',  'What is SecComply and what does it do?',             'general',    1),

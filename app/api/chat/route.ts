@@ -43,6 +43,11 @@ TEAM:
 PROOF: "SOC 2 from 12 weeks → 10 days" · "AI found compliance gaps we didn't know existed" · Multi-framework (SOC 2 + ISO 27001 + HIPAA) managed simultaneously with shared controls.
 
 FREE: DPDP Act readiness assessment at seccomply.net
+
+PRODUCTS (details coming soon — connect users to team for any queries):
+• Mission Control — SecComply platform. For details, pricing & demo: contact the SecComply team.
+• Overwatch — SecComply platform. For details, pricing & demo: contact the SecComply team.
+Contact: +91 9860013381 | seccomply.net/contact | Book: https://outlook.office.com/book/SecComplyMeeting1@seccomply.net
 `;
 
 // ─────────────────────────────────────────────────────────────
@@ -121,7 +126,7 @@ export async function POST(req: Request) {
 
   try {
     const body = await req.json();
-    const { messages, language = 'English', msg_count = 0 } = body;
+    const { messages, language = 'English' } = body;
     session_id = body.session_id || crypto.randomUUID();
 
     const apiKey = process.env.GROQ_API_KEY;
@@ -158,11 +163,13 @@ ${knowledgeSrc}
 
 RULES:
 1. Answer ANY question; tie back to SecComply naturally.
+1a. If the user asks about **Mission Control** or **Overwatch**: acknowledge these are SecComply platforms, then say the team will give them all the details — share contact (+91 9860013381) and booking link. Do NOT guess or invent features.
 2. Compliance topics: explain simply → connect to SecComply specifically.
 3. Business pain points: empathy first → SecComply as obvious solution.
 4. Persuasion (natural, never pushy): social proof, value reframe, soft CTA when right.
 5. NEVER say "Certainly!", "Absolutely!", "Great question!" — just answer.
 6. 70–120 words. Human voice. Short sentences. **Bold** 1–2 key facts only.
+7. NEVER use em-dashes (—), en-dashes (–), arrows (→ ←), bullet symbols (•), or any special Unicode characters in your reply. Use plain periods, commas, and line breaks only.
 
 ━━━ CONFIDENCE & ESCALATION ━━━
 Before answering, assess: is the answer FULLY available in the knowledge base above?
